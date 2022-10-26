@@ -52,19 +52,20 @@ export class TokenGate {
           next();
         })
         .catch((err) => {
-          response.status(500).send(err);
+          console.log(err);
+          response.sendStatus(500);
         });
     };
   }
 
   async hasAccess(endpoint, tzAddr) {
-    console.log(`checking ${tzAddr} access to ${endpoint}..`);
     let rule = this.rules[endpoint];
     if (typeof rule === "undefined") {
       return true;
     }
 
-    return await this.ownsToken(rule.requiredToken, tzAddr);
+    console.log(`enforcing rule on ${endpoint}: ${JSON.stringify(rule)}`);
+    return await this.ownsToken(rule.requireToken, tzAddr);
   }
 
   async ownsToken(tokenId, tzAddr) {
@@ -73,7 +74,7 @@ export class TokenGate {
         await this.db.query(
           `
 SELECT
-  idx_nat AS amount_owned
+  nat AS amount_owned
 FROM "${this.schema}"."storage.ledger_live"
 WHERE idx_nat = $1
   AND idx_address = $2
