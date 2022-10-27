@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "module": "es2022",
+    "moduleResolution": "node",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "target": "es2017",
+    "sourceMap": true,
+    "rootDir": "src",
+    "outDir": "./dist",
+    "incremental": false,
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "types": ["node"],
+    "lib": [
+      "es2020"
+    ]
+  }
+}
