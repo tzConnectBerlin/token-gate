@@ -1,12 +1,15 @@
 import Pool from "pg-pool";
 import { Client } from "pg";
 import { Request, Response, NextFunction } from "express";
+import yaml from "yaml";
+import fs from "fs";
 
 type DbPool = Pool<Client>;
 type Endpoint = string;
 
 interface Rule<TokenType> {
-  requireToken: TokenType;
+  noRules?: boolean;
+  allowedTokens?: TokenType[];
 }
 
 export interface TokenGateSpec {
@@ -38,6 +41,34 @@ export class TokenGate {
     this.tzAddrFromReq = (req: any) => req.auth?.userAddress;
   }
 
+  loadSpecFromFile(filepath: string, overwrite: boolean = true) {
+    const parsed = yaml.parse(fs.readFileSync(filepath, "utf8"));
+
+    console.log(parsed);
+
+    if (overwrite) {
+      this.rules = {};
+      this.tokenIdNames = {};
+      this.tokenNameIds = {};
+    }
+    for (const id of Object.keys(parsed.tokenNames ?? {})) {
+      const name = parsed.tokenNames[id];
+      this.nameTokenId(Number(id), name);
+    }
+    for (const endpoint of Object.keys(parsed.rules ?? {})) {
+      const endpointRule = parsed.rules[endpoint];
+      if (endpointRule === "no_rules") {
+        this.rules[endpoint] = {
+          noRules: true,
+        };
+        continue;
+      }
+      for (const token of parsed.rules[endpoint].one_of ?? []) {
+        this.allowToken(endpoint, token);
+      }
+    }
+  }
+
   setUrlFromReqFunc(f: (req: Request) => string) {
     this.tzAddrFromReq = f;
   }
@@ -52,7 +83,7 @@ export class TokenGate {
     return this;
   }
 
-  requireToken(endpoint: Endpoint, token: number | string) {
+  allowToken(endpoint: Endpoint, token: number | string) {
     if (typeof token === "string") {
       if (typeof this.tokenNameIds[token] === "undefined") {
         throw new Error(`unknown token reference ${token}`);
@@ -60,17 +91,18 @@ export class TokenGate {
       token = this.tokenNameIds[token];
     }
     this.rules[endpoint] = {
-      requireToken: token,
+      allowedTokens: [...(this.rules[endpoint]?.allowedTokens ?? []), token],
     };
     return this;
   }
 
   getSpec(): TokenGateSpec {
     return Object.keys(this.rules).reduce((res, endpoint) => {
-      const requireTokenId = this.rules[endpoint].requireToken;
-      const requireTokenName = this.tokenIdNames[requireTokenId];
       res[endpoint] = {
-        requireToken: requireTokenName ?? requireTokenId,
+        noRules: this.rules[endpoint].noRules,
+        allowedTokens: this.rules[endpoint].allowedTokens?.map(
+          (t) => this.tokenIdNames[t] ?? t
+        ),
       };
       return res;
     }, <TokenGateSpec>{});
@@ -82,7 +114,6 @@ export class TokenGate {
   }
 
   use(req: Request, resp: Response, next: NextFunction): void {
-    console.log(req);
     const url = this.urlFromReq(req);
     const tzAddr = this.tzAddrFromReq(req);
     this.hasAccess(url, tzAddr)
@@ -101,12 +132,16 @@ export class TokenGate {
 
   async hasAccess(endpoint: Endpoint, tzAddr: string): Promise<boolean> {
     const rule = this.getRuleForEndpoint(endpoint);
-    if (typeof rule === "undefined") {
+    if (typeof rule === "undefined" || rule.noRules) {
       return true;
     }
 
-    console.log(`enforcing rule on ${endpoint}: ${JSON.stringify(rule)}`);
-    return await this.ownsToken(rule.requireToken, tzAddr);
+    if (typeof rule.allowedTokens !== "undefined") {
+      console.log(`enforcing rule on ${endpoint}: ${JSON.stringify(rule)}`);
+      return await this.ownsOneOf(tzAddr, rule.allowedTokens);
+    }
+
+    return true;
   }
 
   getRuleForEndpoint(endpoint: Endpoint): Rule<number> | undefined {
@@ -128,18 +163,18 @@ export class TokenGate {
     return this.rules["/"];
   }
 
-  async ownsToken(tokenId: number, tzAddr: string): Promise<boolean> {
+  async ownsOneOf(tzAddr: string, tokenIds: number[]): Promise<boolean> {
     const amountOwned =
       (
         await this.db.query(
           `
 SELECT
-  nat AS amount_owned
+  SUM(nat) AS amount_owned
 FROM "${this.schema}"."storage.ledger_live"
-WHERE idx_nat = $1
-  AND idx_address = $2
+WHERE idx_address = $1
+  AND idx_nat = ANY($2)
       `,
-          [tokenId, tzAddr]
+          [tzAddr, tokenIds]
         )
       ).rows[0]?.amount_owned ?? 0;
 
