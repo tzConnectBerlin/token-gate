@@ -20,7 +20,7 @@ export class TokenGate {
   tokenIdNames: { [key: number]: string };
   tokenNameIds: { [key: string]: number };
 
-  spec: { [key: Endpoint]: Rule<number> };
+  rules: { [key: Endpoint]: Rule<number> };
 
   urlFromReq: (req: Request) => string;
   tzAddrFromReq: (req: Request) => string;
@@ -29,12 +29,12 @@ export class TokenGate {
     this.db = dbPool;
     this.schema = dbSchema;
 
-    this.spec = {};
+    this.rules = {};
 
     this.tokenIdNames = {};
     this.tokenNameIds = {};
 
-    this.urlFromReq = (req) => req.originalUrl; // or _parsedUrl.path ?
+    this.urlFromReq = (req) => req.baseUrl; // or _parsedUrl.path ?
     this.tzAddrFromReq = (req: any) => req.auth?.userAddress;
   }
 
@@ -59,15 +59,15 @@ export class TokenGate {
       }
       token = this.tokenNameIds[token];
     }
-    this.spec[endpoint] = {
+    this.rules[endpoint] = {
       requireToken: token,
     };
     return this;
   }
 
   getSpec(): TokenGateSpec {
-    return Object.keys(this.spec).reduce((res, endpoint) => {
-      const requireTokenId = this.spec[endpoint].requireToken;
+    return Object.keys(this.rules).reduce((res, endpoint) => {
+      const requireTokenId = this.rules[endpoint].requireToken;
       const requireTokenName = this.tokenIdNames[requireTokenId];
       res[endpoint] = {
         requireToken: requireTokenName ?? requireTokenId,
@@ -76,12 +76,13 @@ export class TokenGate {
     }, <TokenGateSpec>{});
   }
 
-  middleware() {
+  middleware(): (req: Request, resp: Response, next: NextFunction) => void {
     return (req: Request, resp: Response, next: NextFunction) =>
       this.use(req, resp, next);
   }
 
-  use(req: Request, resp: Response, next: NextFunction) {
+  use(req: Request, resp: Response, next: NextFunction): void {
+    console.log(req);
     const url = this.urlFromReq(req);
     const tzAddr = this.tzAddrFromReq(req);
     this.hasAccess(url, tzAddr)
@@ -99,13 +100,32 @@ export class TokenGate {
   }
 
   async hasAccess(endpoint: Endpoint, tzAddr: string): Promise<boolean> {
-    const rule = this.spec[endpoint];
+    const rule = this.getRuleForEndpoint(endpoint);
     if (typeof rule === "undefined") {
       return true;
     }
 
     console.log(`enforcing rule on ${endpoint}: ${JSON.stringify(rule)}`);
     return await this.ownsToken(rule.requireToken, tzAddr);
+  }
+
+  getRuleForEndpoint(endpoint: Endpoint): Rule<number> | undefined {
+    const stripTrailingSlash = (x: Endpoint) => x.replace(/\/+$/, "");
+    const reduceEndpoint = (x: Endpoint) =>
+      stripTrailingSlash(x).split("/").slice(0, -1).join("/") + "/";
+
+    for (
+      endpoint = stripTrailingSlash(endpoint);
+      endpoint !== "/";
+      endpoint = reduceEndpoint(endpoint)
+    ) {
+      const rule = this.rules[endpoint];
+      if (typeof rule !== "undefined") {
+        return rule;
+      }
+    }
+
+    return this.rules["/"];
   }
 
   async ownsToken(tokenId: number, tzAddr: string): Promise<boolean> {
