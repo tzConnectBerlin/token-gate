@@ -242,10 +242,10 @@ export class TokenGate {
       await this.db.query(
         `
 SELECT
-  ${this.columns.token} AS token_id
+  "${this.columns.token}" AS token_id
 FROM "${this.schema}"."${this.table}"
-WHERE ${this.columns.address} = $1
-  AND ${this.columns.amount} > 0
+WHERE "${this.columns.address}" = $1
+  AND "${this.columns.amount}" > 0
       `,
         [tzAddr]
       )
