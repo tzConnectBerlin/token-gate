@@ -160,6 +160,12 @@ export class TokenGate {
     }, <TokenGateSpec>{});
   }
 
+  getEndpointAllowedTokens(e: string): (string | number)[] | undefined {
+    return maybe(this.#getRuleForEndpoint(e)?.allowedTokens, (allowedTokens) =>
+      allowedTokens.map((t) => this.tokenIdNames[t] ?? t)
+    );
+  }
+
   middleware(): (req: Request, resp: Response, next: NextFunction) => void {
     return (req: Request, resp: Response, next: NextFunction) =>
       this.use(req, resp, next);
@@ -182,21 +188,34 @@ export class TokenGate {
       });
   }
 
-  async hasAccess(endpoint: Endpoint, tzAddr: string): Promise<boolean> {
-    const rule = this.getRuleForEndpoint(endpoint);
+  async hasAccess(
+    endpoint: Endpoint,
+    tzAddr: string | undefined
+  ): Promise<boolean> {
+    const rule = this.#getRuleForEndpoint(endpoint);
     if (typeof rule === "undefined" || rule.noRules) {
       return true;
     }
 
     if (typeof rule.allowedTokens !== "undefined") {
       console.log(`enforcing rule on ${endpoint}: ${JSON.stringify(rule)}`);
-      return await this.ownsOneOf(tzAddr, rule.allowedTokens);
+
+      if (typeof tzAddr === "undefined") {
+        return false;
+      }
+      return await this.#ownsOneOf(tzAddr, rule.allowedTokens);
     }
 
     return true;
   }
 
-  getRuleForEndpoint(endpoint: Endpoint): Rule<number> | undefined {
+  async getOwnedTokens(tzAddr: string): Promise<(number | string)[]> {
+    return (await this.#getOwnedTokens(tzAddr)).map(
+      (t) => this.tokenIdNames[t] ?? t
+    );
+  }
+
+  #getRuleForEndpoint(endpoint: Endpoint): Rule<number> | undefined {
     const stripTrailingSlash = (x: Endpoint) => x.replace(/\/+$/, "");
     const reduceEndpoint = (x: Endpoint) =>
       stripTrailingSlash(x).split("/").slice(0, -1).join("/") + "/";
@@ -215,21 +234,23 @@ export class TokenGate {
     return this.rules["/"];
   }
 
-  async ownsOneOf(tzAddr: string, tokenIds: number[]): Promise<boolean> {
-    const amountOwned =
-      (
-        await this.db.query(
-          `
-SELECT
-  SUM(${this.columns.amount}) AS amount_owned
-FROM "${this.schema}"."storage.ledger_live"
-WHERE ${this.columns.address} = $1
-  AND ${this.columns.token} = ANY($2)
-      `,
-          [tzAddr, tokenIds]
-        )
-      ).rows[0]?.amount_owned ?? 0;
+  async #ownsOneOf(tzAddr: string, tokenIds: number[]): Promise<boolean> {
+    const ownedTokens = await this.#getOwnedTokens(tzAddr);
+    return ownedTokens.some((t) => tokenIds.includes(t));
+  }
 
-    return amountOwned > 0;
+  async #getOwnedTokens(tzAddr: string): Promise<number[]> {
+    return (
+      await this.db.query(
+        `
+SELECT
+  ${this.columns.token} AS token_id
+FROM "${this.schema}"."${this.table}"
+WHERE ${this.columns.address} = $1
+  AND ${this.columns.amount} > 0
+      `,
+        [tzAddr]
+      )
+    ).rows.map((row: any) => Number(row["token_id"]));
   }
 }
