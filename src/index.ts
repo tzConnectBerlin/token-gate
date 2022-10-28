@@ -198,8 +198,6 @@ export class TokenGate {
     }
 
     if (typeof rule.allowedTokens !== "undefined") {
-      console.log(`enforcing rule on ${endpoint}: ${JSON.stringify(rule)}`);
-
       if (typeof tzAddr === "undefined") {
         return false;
       }
