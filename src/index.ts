@@ -36,7 +36,7 @@ export class TokenGate {
   rules: { [key: Endpoint]: Rule<number> };
 
   urlFromReq: (req: Request) => string;
-  tzAddrFromReq: (req: Request) => string;
+  tzAddrFromReq: (req: Request) => string | undefined;
 
   constructor({ dbPool }: { dbPool: DbPool }) {
     this.db = dbPool;
@@ -58,11 +58,11 @@ export class TokenGate {
     this.tzAddrFromReq = (req: any) => req.auth?.userAddress;
   }
 
-  loadSpecFromFile(filepath: string, overwrite: boolean = true) {
+  loadSpecFromFile(filepath: string, overwrite: boolean = true): this {
     const parsed = yaml.parse(fs.readFileSync(filepath, "utf8"));
     if (parsed == null) {
       console.warn(`token gate: parse of ${filepath} is null, nothing loaded`);
-      return;
+      return this;
     }
 
     if (overwrite) {
@@ -102,6 +102,8 @@ export class TokenGate {
         }
       }
     });
+
+    return this;
   }
 
   setUrlFromReqFunc(f: (req: Request) => string) {
@@ -109,7 +111,7 @@ export class TokenGate {
     return this;
   }
 
-  setTzAddrFromReqFunc(f: (req: Request) => string): this {
+  setTzAddrFromReqFunc(f: (req: Request) => string | undefined): this {
     this.tzAddrFromReq = f;
     return this;
   }
