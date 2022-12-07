@@ -35,7 +35,6 @@ export class TokenGate {
   table: string;
   columns: CustomizableColumns;
 
-  // tokenIdNames: { [key: number]: string };
   tokenNameRanges: { [key: string]: Range };
 
   rules: { [key: Endpoint]: Rule };
@@ -132,6 +131,15 @@ export class TokenGate {
   }
 
   nameTokenIdRange(n: string, r: Range): this {
+    if (r.from > r.to) {
+      throw `range is not allowed to have a from bigger than a to (range sspecified is ${JSON.stringify(r)}`;
+    }
+    for (const existingName of Object.keys(this.tokenNameRanges)) {
+      const existingRange = this.tokenNameRanges[existingName];
+      if (r.from <= existingRange.to && existingRange.from <= r.to) {
+        throw `not allowed to have overlapping ranges. range ${JSON.stringify(r)} overlaps with previously specified range ${JSON.stringify(existingRange)}`;
+      }
+    }
     this.tokenNameRanges[n] = r;
     return this;
   }
