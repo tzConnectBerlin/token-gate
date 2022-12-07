@@ -8,9 +8,9 @@ import { maybe } from "./utils.js";
 type DbPool = Pool<Client>;
 type Endpoint = string;
 
-interface Rule<TokenType> {
+interface Rule {
   noRules?: boolean;
-  allowedTokens?: TokenType[];
+  allowedTokens?: string[];
 }
 
 interface CustomizableColumns {
@@ -20,7 +20,12 @@ interface CustomizableColumns {
 }
 
 export interface TokenGateSpec {
-  [key: Endpoint]: Rule<number | string>;
+  [key: Endpoint]: Rule;
+}
+
+interface Range {
+  from: number;
+  to: number;
 }
 
 export class TokenGate {
@@ -30,10 +35,10 @@ export class TokenGate {
   table: string;
   columns: CustomizableColumns;
 
-  tokenIdNames: { [key: number]: string };
-  tokenNameIds: { [key: string]: number };
+  // tokenIdNames: { [key: number]: string };
+  tokenNameRanges: { [key: string]: Range };
 
-  rules: { [key: Endpoint]: Rule<number> };
+  rules: { [key: Endpoint]: Rule };
 
   urlFromReq: (req: Request) => string;
   tzAddrFromReq: (req: Request) => string | undefined;
@@ -51,8 +56,7 @@ export class TokenGate {
 
     this.rules = {};
 
-    this.tokenIdNames = {};
-    this.tokenNameIds = {};
+    this.tokenNameRanges = {};
 
     this.urlFromReq = (req) => req.baseUrl;
     this.tzAddrFromReq = (req: any) => req.auth?.userAddress;
@@ -67,8 +71,7 @@ export class TokenGate {
 
     if (overwrite) {
       this.rules = {};
-      this.tokenIdNames = {};
-      this.tokenNameIds = {};
+      this.tokenNameRanges = {};
     }
 
     maybe(parsed.schema, (s) => this.setSchema(s));
@@ -82,9 +85,21 @@ export class TokenGate {
     });
 
     maybe(parsed.tokenNames, (tNames) => {
-      for (const id of Object.keys(tNames)) {
-        const name = tNames[id];
-        this.nameTokenId(Number(id), name);
+      for (const name of Object.keys(tNames)) {
+        let range = tNames[name];
+        if (typeof range === "number") {
+          range = {
+            from: range,
+            to: range,
+          };
+        }
+        if (
+          typeof range.from === "undefined" ||
+          typeof range.to === "undefined"
+        ) {
+          throw `invalid named token id range, must be either a number or a 'from: ..' and a 'to: ...'`;
+        }
+        this.nameTokenIdRange(name, range);
       }
     });
 
@@ -116,9 +131,8 @@ export class TokenGate {
     return this;
   }
 
-  nameTokenId(id: number, n: string): this {
-    this.tokenIdNames[id] = n;
-    this.tokenNameIds[n] = id;
+  nameTokenIdRange(n: string, r: Range): this {
+    this.tokenNameRanges[n] = r;
     return this;
   }
 
@@ -137,13 +151,7 @@ export class TokenGate {
     return this;
   }
 
-  allowToken(e: Endpoint, t: number | string): this {
-    if (typeof t === "string") {
-      if (typeof this.tokenNameIds[t] === "undefined") {
-        throw new Error(`unknown token reference ${t}`);
-      }
-      t = this.tokenNameIds[t];
-    }
+  allowToken(e: Endpoint, t: string): this {
     this.rules[e] = {
       allowedTokens: [...(this.rules[e]?.allowedTokens ?? []), t],
     };
@@ -154,18 +162,14 @@ export class TokenGate {
     return Object.keys(this.rules).reduce((res, endpoint) => {
       res[endpoint] = {
         noRules: this.rules[endpoint].noRules,
-        allowedTokens: this.rules[endpoint].allowedTokens?.map(
-          (t) => this.tokenIdNames[t] ?? t
-        ),
+        allowedTokens: this.rules[endpoint].allowedTokens,
       };
       return res;
     }, <TokenGateSpec>{});
   }
 
-  getEndpointAllowedTokens(e: string): (string | number)[] | undefined {
-    return maybe(this.#getRuleForEndpoint(e)?.allowedTokens, (allowedTokens) =>
-      allowedTokens.map((t) => this.tokenIdNames[t] ?? t)
-    );
+  getEndpointAllowedTokens(e: string): string[] | undefined {
+    return this.#getRuleForEndpoint(e)?.allowedTokens;
   }
 
   middleware(): (req: Request, resp: Response, next: NextFunction) => void {
@@ -210,12 +214,22 @@ export class TokenGate {
   }
 
   async getOwnedTokens(tzAddr: string): Promise<(number | string)[]> {
-    return (await this.#getOwnedTokens(tzAddr)).map(
-      (t) => this.tokenIdNames[t] ?? t
+    return (await this.#getOwnedTokens(tzAddr)).map((t) =>
+      this.#tryNameTokenId(t)
     );
   }
 
-  #getRuleForEndpoint(endpoint: Endpoint): Rule<number> | undefined {
+  #tryNameTokenId(tokenId: number): number | string {
+    for (const n of Object.keys(this.tokenNameRanges)) {
+      const r = this.tokenNameRanges[n];
+      if (tokenId >= r.from && tokenId <= r.to) {
+        return n;
+      }
+    }
+    return tokenId;
+  }
+
+  #getRuleForEndpoint(endpoint: Endpoint): Rule | undefined {
     const stripTrailingSlash = (x: Endpoint) => x.replace(/\/+$/, "");
     const reduceEndpoint = (x: Endpoint) =>
       stripTrailingSlash(x).split("/").slice(0, -1).join("/") + "/";
@@ -234,9 +248,12 @@ export class TokenGate {
     return this.rules["/"];
   }
 
-  async #ownsOneOf(tzAddr: string, tokenIds: number[]): Promise<boolean> {
+  async #ownsOneOf(tzAddr: string, tokenRanges: string[]): Promise<boolean> {
     const ownedTokens = await this.#getOwnedTokens(tzAddr);
-    return ownedTokens.some((t) => tokenIds.includes(t));
+    const rangesAllowed = tokenRanges.map((n) => this.tokenNameRanges[n]);
+    return ownedTokens.some((t) =>
+      rangesAllowed.some((r) => t >= r.from && t <= r.to)
+    );
   }
 
   async #getOwnedTokens(tzAddr: string): Promise<number[]> {
