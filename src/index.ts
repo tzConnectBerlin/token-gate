@@ -132,12 +132,18 @@ export class TokenGate {
 
   nameTokenIdRange(n: string, r: Range): this {
     if (r.from > r.to) {
-      throw `range is not allowed to have a from bigger than a to (range sspecified is ${JSON.stringify(r)}`;
+      throw `range is not allowed to have a from bigger than a to (range sspecified is ${JSON.stringify(
+        r
+      )}`;
     }
     for (const existingName of Object.keys(this.tokenNameRanges)) {
       const existingRange = this.tokenNameRanges[existingName];
       if (r.from <= existingRange.to && existingRange.from <= r.to) {
-        throw `not allowed to have overlapping ranges. range ${JSON.stringify(r)} overlaps with previously specified range ${JSON.stringify(existingRange)}`;
+        throw `not allowed to have overlapping ranges. range ${JSON.stringify(
+          r
+        )} overlaps with previously specified range ${JSON.stringify(
+          existingRange
+        )}`;
       }
     }
     this.tokenNameRanges[n] = r;
@@ -222,8 +228,8 @@ export class TokenGate {
   }
 
   async getOwnedTokens(tzAddr: string): Promise<string[]> {
-    return (await this.#getOwnedTokens(tzAddr)).flatMap((t) =>
-      this.#tryNameTokenId(t) ?? []
+    return (await this.#getOwnedTokens(tzAddr)).flatMap(
+      (t) => this.#tryNameTokenId(t) ?? []
     );
   }
 
@@ -234,7 +240,6 @@ export class TokenGate {
         return n;
       }
     }
-    return tokenId;
   }
 
   #getRuleForEndpoint(endpoint: Endpoint): Rule | undefined {
