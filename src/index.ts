@@ -221,13 +221,13 @@ export class TokenGate {
     return true;
   }
 
-  async getOwnedTokens(tzAddr: string): Promise<(number | string)[]> {
-    return (await this.#getOwnedTokens(tzAddr)).map((t) =>
-      this.#tryNameTokenId(t)
+  async getOwnedTokens(tzAddr: string): Promise<string[]> {
+    return (await this.#getOwnedTokens(tzAddr)).flatMap((t) =>
+      this.#tryNameTokenId(t) ?? []
     );
   }
 
-  #tryNameTokenId(tokenId: number): number | string {
+  #tryNameTokenId(tokenId: number): string | undefined {
     for (const n of Object.keys(this.tokenNameRanges)) {
       const r = this.tokenNameRanges[n];
       if (tokenId >= r.from && tokenId <= r.to) {
