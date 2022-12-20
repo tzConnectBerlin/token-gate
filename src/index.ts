@@ -225,7 +225,7 @@ export class TokenGate {
     const qryResp = await this.db.query(
       `
 SELECT 1
-FROM addresses_enabled
+FROM whitelisted_wallet_addresses
 WHERE address = $1
   AND NOT claimed
       `,
