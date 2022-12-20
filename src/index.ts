@@ -42,6 +42,8 @@ export class TokenGate {
   urlFromReq: (req: Request) => string;
   tzAddrFromReq: (req: Request) => string | undefined;
 
+  applyAddressWhitelist: boolean;
+
   constructor({ dbPool }: { dbPool: DbPool }) {
     this.db = dbPool;
 
@@ -59,6 +61,8 @@ export class TokenGate {
 
     this.urlFromReq = (req) => req.baseUrl;
     this.tzAddrFromReq = (req: any) => req.auth?.userAddress;
+
+    this.applyAddressWhitelist = false;
   }
 
   loadSpecFromFile(filepath: string, overwrite: boolean = true): this {
@@ -172,6 +176,11 @@ export class TokenGate {
     return this;
   }
 
+  enableAddressWhitelist(): this {
+    this.applyAddressWhitelist = true;
+    return this;
+  }
+
   getSpec(): TokenGateSpec {
     return Object.keys(this.rules).reduce((res, endpoint) => {
       res[endpoint] = {
@@ -194,10 +203,21 @@ export class TokenGate {
   use(req: Request, resp: Response, next: NextFunction): void {
     const url = this.urlFromReq(req);
     const tzAddr = this.tzAddrFromReq(req);
+
     this.hasAccess(url, tzAddr)
       .then((access) => {
         if (!access) {
           resp.sendStatus(403);
+          return;
+        }
+        if (this.applyAddressWhitelist) {
+          this.isAddressInWhitelist(tzAddr).then((isAllowed) => {
+            if (!isAllowed) {
+              resp.status(403).send('{"error": "not in address enable list"}');
+              return;
+            }
+            next();
+          });
           return;
         }
         next();
@@ -206,6 +226,25 @@ export class TokenGate {
         console.log(err);
         resp.sendStatus(500);
       });
+  }
+
+  async isAddressInWhitelist(userAddress?: string): Promise<boolean> {
+    if (typeof userAddress === "undefined") {
+      return false;
+    }
+    const qryResp = await this.db.query(
+      `
+SELECT 1
+FROM addresses_enabled
+WHERE address = $1
+  AND NOT claimed
+      `,
+      [userAddress]
+    );
+    if (qryResp.rowCount === 0) {
+      return false;
+    }
+    return true;
   }
 
   async hasAccess(
