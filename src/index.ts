@@ -210,16 +210,6 @@ export class TokenGate {
           resp.sendStatus(403);
           return;
         }
-        if (this.applyAddressWhitelist) {
-          this.isAddressInWhitelist(tzAddr).then((isAllowed) => {
-            if (!isAllowed) {
-              resp.status(403).send('{"error": "not in address enable list"}');
-              return;
-            }
-            next();
-          });
-          return;
-        }
         next();
       })
       .catch((err) => {
@@ -258,6 +248,12 @@ WHERE address = $1
 
     if (typeof rule.allowedTokens !== "undefined") {
       if (typeof tzAddr === "undefined") {
+        return false;
+      }
+      if (
+        this.applyAddressWhitelist &&
+        !(await this.isAddressInWhitelist(tzAddr))
+      ) {
         return false;
       }
       return await this.#ownsOneOf(tzAddr, rule.allowedTokens);
