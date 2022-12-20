@@ -218,23 +218,24 @@ export class TokenGate {
       });
   }
 
-  async isAddressInWhitelist(userAddress?: string): Promise<boolean> {
+  async isAddressInWhitelist(
+    userAddress?: string
+  ): Promise<"allowed" | "claimed" | "forbidden"> {
     if (typeof userAddress === "undefined") {
-      return false;
+      return "forbidden";
     }
     const qryResp = await this.db.query(
       `
-SELECT 1
+SELECT claimed
 FROM whitelisted_wallet_addresses
 WHERE address = $1
-  AND NOT claimed
       `,
       [userAddress]
     );
     if (qryResp.rowCount === 0) {
-      return false;
+      return "forbidden";
     }
-    return true;
+    return qryResp.rows[0].claimed ? "claimed" : "allowed";
   }
 
   async hasAccess(
@@ -252,7 +253,7 @@ WHERE address = $1
       }
       if (
         this.applyAddressWhitelist &&
-        !(await this.isAddressInWhitelist(tzAddr))
+        (await this.isAddressInWhitelist(tzAddr)) !== "allowed"
       ) {
         return false;
       }
