@@ -43,6 +43,7 @@ export class TokenGate {
   tzAddrFromReq: (req: Request) => string | undefined;
 
   applyAddressWhitelist: boolean;
+  maxWhitelistedClaims: number;
 
   constructor({ dbPool }: { dbPool: DbPool }) {
     this.db = dbPool;
@@ -63,6 +64,7 @@ export class TokenGate {
     this.tzAddrFromReq = (req: any) => req.auth?.userAddress;
 
     this.applyAddressWhitelist = false;
+    this.maxWhitelistedClaims = 0;
   }
 
   loadSpecFromFile(filepath: string, overwrite: boolean = true): this {
@@ -176,8 +178,9 @@ export class TokenGate {
     return this;
   }
 
-  enableAddressWhitelist(): this {
+  enableAddressWhitelist(maxClaims: number = 1): this {
     this.applyAddressWhitelist = true;
+    this.maxWhitelistedClaims = maxClaims;
     return this;
   }
 
@@ -235,7 +238,9 @@ WHERE address = $1
     if (qryResp.rowCount === 0) {
       return "forbidden";
     }
-    return qryResp.rows[0].claimed ? "claimed" : "allowed";
+    return Number(qryResp.rows[0].claimed) >= this.maxWhitelistedClaims
+      ? "claimed"
+      : "allowed";
   }
 
   async hasAccess(
